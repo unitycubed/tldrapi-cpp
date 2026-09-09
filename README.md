@@ -1,7 +1,7 @@
 # tldrapi-cpp — C++ SDK for TLDRapi
 
 Header-only C++17 client for the
-[TLDRapi](https://unitycubed.dev/TLDRapi/) text-summarization API.
+[TLDRapi](https://tldrapi-summarizer.p.rapidapi.com/) text-summarization API.
 
 - **Single header** — `#include <tldrapi/tldrapi.hpp>` and go
 - **One link-time dependency**: libcurl (macOS ships it; Linux
