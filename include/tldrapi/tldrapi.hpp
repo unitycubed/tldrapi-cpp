@@ -65,7 +65,7 @@
 namespace tldrapi {
 
 constexpr const char* SDK_VERSION = "0.1.0";
-constexpr const char* DEFAULT_RAPIDAPI_HOST = "tldrapi-summarizer.p.rapidapi.com";
+constexpr const char* DEFAULT_RAPIDAPI_HOST = "tldrapi-summarization.p.rapidapi.com";
 
 // Quality tiers. Free tier: pass tier::none (or leave options.tier at
 // default) and the server picks. Paid tiers: pick explicitly.
