@@ -51,6 +51,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -131,10 +132,30 @@ struct client_options {
     std::string user_agent;
 };
 
+// Optional per-call generation config for client::summarize. Omitted
+// (nullopt) fields fall through to server tier defaults. Shape mirrors
+// openapi.yaml SummarizeRequest.config.
+struct summarize_config {
+    std::optional<std::string> model_alias;
+    std::optional<double> temperature;
+    std::optional<double> top_p;
+    std::optional<int> max_output_tokens;
+    std::optional<int> max_input_tokens;
+
+    bool empty() const {
+        return !model_alias && !temperature && !top_p
+            && !max_output_tokens && !max_input_tokens;
+    }
+};
+
 struct summarize_options {
     tier tier = tier::none;
     std::string session_id;
     std::string model_alias;
+    // Optional per-call generation overrides. When set (and non-empty),
+    // serialized into the `config` sub-object of the summarize request
+    // body. Matches openapi.yaml SummarizeRequest.config.
+    std::optional<::tldrapi::summarize_config> config;
     bool allow_overage = false;
     std::unordered_map<std::string, std::string> extra_headers;
     long timeout_seconds = 0;  // 0 = inherit client default
@@ -164,21 +185,115 @@ struct summarize_result {
     std::string raw_body;
 };
 
+// Rates response. Shape aligned with openapi.yaml RatesResponse. Pre-1.0
+// releases parsed tier ints from top-level keys and used `updated_at`;
+// the server has always nested tiers under `credits_per_call` and named
+// the timestamp `credit_costs_updated_at`. `updated_at` is kept as a
+// deprecated alias so existing call sites still compile.
 struct rates_result {
     int quick = 1;
     int standard = 5;
     int deep = 30;
     int premium = 110;
     int ultra = 400;
-    std::string updated_at;
+    std::string credit_costs_updated_at;
+    std::string updated_at;  // Deprecated: use credit_costs_updated_at.
+    std::string history_url;
     std::string raw_body;
 };
 
+// Plan-limit sub-object of usage_stats. -1 means "not reported by server".
+struct usage_limits {
+    long per_minute = -1;
+    long daily = -1;
+    long credits = -1;
+    long concurrent = -1;
+};
+
+// Usage response. Fields align with openapi.yaml UsageResponse. Pre-1.0
+// releases parsed period/calls/credits_charged/credits_remaining — none
+// of which the server has ever emitted — so every field returned zero.
 struct usage_stats {
-    std::string period;
-    int calls = 0;
-    int credits_charged = 0;
-    int credits_remaining = 0;
+    long usage_count = 0;
+    long successful_requests = 0;
+    long failed_requests = 0;
+    double average_response_time_ms = 0.0;
+    double error_rate = 0.0;
+    std::string plan;
+    usage_limits limits;
+    std::string raw_body;
+};
+
+// Common result of the text-body /convert/{json,html,md}-to-text
+// endpoints. Shape mirrors openapi.yaml ConvertTextResponse.
+struct convert_result {
+    std::string output;
+    std::string output_format;   // "text" | "latex"
+    std::string input_format;    // json | html | md
+    long input_bytes = 0;
+    long output_chars = 0;
+    long elapsed_ms = 0;
+    std::string request_id;
+    std::string raw_body;
+};
+
+// One row of rates_history_result.
+struct rates_history_change {
+    std::string changed_at;
+    std::string tier;
+    int credits_before = 0;
+    int credits_after = 0;
+    std::string reason;
+    std::string operator_name;
+};
+
+struct rates_history_result {
+    std::vector<rates_history_change> history;
+    long range_days = 30;
+    long total_changes = 0;
+    std::string raw_body;
+};
+
+struct usage_range_day {
+    std::string date;
+    long credits_used = 0;
+    long call_count = 0;
+};
+
+struct usage_range_result {
+    std::string from;
+    std::string to;
+    long credits_used = 0;
+    std::vector<usage_range_day> daily;
+    std::string raw_body;
+};
+
+// Return of client::custom_prompt_submit. voice_reference is empty on
+// rejection; on approval it's the string to pass as `voice=` on future
+// summarize calls.
+struct custom_prompt_result {
+    std::string id;
+    std::string voice_name;
+    std::string status;
+    bool approved = false;
+    std::string voice_reference;
+    std::string rejection_reason;
+    bool updated_in_place = false;
+    std::string raw_body;
+};
+
+struct custom_prompt_detail {
+    std::string id;
+    std::string customer_id;
+    std::string voice_name;
+    std::string instruction;
+    std::string status;
+    std::string voice_reference;
+    std::string approved_alias;
+    std::string rejection_reason;
+    std::string judge_verdict_json;
+    std::string submitted_at;
+    std::string reviewed_at;
     std::string raw_body;
 };
 
@@ -439,6 +554,9 @@ public:
         std::string body = "{\"input_text\":\"" + detail::escape_json(input_text) + "\"";
         if (!opts.session_id.empty()) body += ",\"session_id\":\"" + detail::escape_json(opts.session_id) + "\"";
         if (!opts.model_alias.empty()) body += ",\"model_alias\":\"" + detail::escape_json(opts.model_alias) + "\"";
+        if (opts.config && !opts.config->empty()) {
+            body += ",\"config\":" + serialize_config(*opts.config);
+        }
         body += "}";
 
         auto headers = build_headers(opts.tier, opts.extra_headers);
@@ -462,12 +580,18 @@ public:
     rates_result rates() {
         auto resp = request("GET", "/rates", "", build_headers(tier::none, {}), 0);
         rates_result r;
-        r.quick    = static_cast<int>(detail::get_number(resp.body, "quick"));
-        r.standard = static_cast<int>(detail::get_number(resp.body, "standard"));
-        r.deep     = static_cast<int>(detail::get_number(resp.body, "deep"));
-        r.premium  = static_cast<int>(detail::get_number(resp.body, "premium"));
-        r.ultra    = static_cast<int>(detail::get_number(resp.body, "ultra"));
-        r.updated_at = detail::get_string(resp.body, "updated_at");
+        // Spec (openapi.yaml RatesResponse): tier ints nested under
+        // `credits_per_call`, timestamp is `credit_costs_updated_at`,
+        // `history_url` is top-level.
+        auto cpc = detail::get_object(resp.body, "credits_per_call");
+        r.quick    = static_cast<int>(detail::get_number(cpc, "quick"));
+        r.standard = static_cast<int>(detail::get_number(cpc, "standard"));
+        r.deep     = static_cast<int>(detail::get_number(cpc, "deep"));
+        r.premium  = static_cast<int>(detail::get_number(cpc, "premium"));
+        r.ultra    = static_cast<int>(detail::get_number(cpc, "ultra"));
+        r.credit_costs_updated_at = detail::get_string(resp.body, "credit_costs_updated_at");
+        r.updated_at = r.credit_costs_updated_at;  // Deprecated alias.
+        r.history_url = detail::get_string(resp.body, "history_url");
         r.raw_body = resp.body;
         // Preserve library defaults if server sent zeros.
         if (r.quick == 0) r.quick = 1;
@@ -481,16 +605,177 @@ public:
     usage_stats usage() {
         auto resp = request("GET", "/usage", "", build_headers(tier::none, {}), 0);
         usage_stats u;
-        u.period = detail::get_string(resp.body, "period");
-        u.calls = static_cast<int>(detail::get_number(resp.body, "calls"));
-        u.credits_charged = static_cast<int>(detail::get_number(resp.body, "credits_charged"));
-        u.credits_remaining = static_cast<int>(detail::get_number(resp.body, "credits_remaining"));
+        u.usage_count = static_cast<long>(detail::get_number(resp.body, "usage_count"));
+        u.successful_requests = static_cast<long>(detail::get_number(resp.body, "successful_requests"));
+        u.failed_requests = static_cast<long>(detail::get_number(resp.body, "failed_requests"));
+        u.average_response_time_ms = detail::get_number(resp.body, "average_response_time_ms");
+        u.error_rate = detail::get_number(resp.body, "error_rate");
+        u.plan = detail::get_string(resp.body, "plan");
+        auto lim = detail::get_object(resp.body, "limits");
+        if (!lim.empty()) {
+            u.limits.per_minute = static_cast<long>(detail::get_number(lim, "per_minute"));
+            u.limits.daily      = static_cast<long>(detail::get_number(lim, "daily"));
+            u.limits.credits    = static_cast<long>(detail::get_number(lim, "credits"));
+            u.limits.concurrent = static_cast<long>(detail::get_number(lim, "concurrent"));
+        }
         u.raw_body = resp.body;
         return u;
     }
 
+    // ---- /convert/{json,html,md}-to-text (text body) ----
+
+    convert_result convert_json_to_text(const std::string& text) {
+        return convert_text("/convert/json-to-text", text);
+    }
+    convert_result convert_html_to_text(const std::string& text) {
+        return convert_text("/convert/html-to-text", text);
+    }
+    convert_result convert_md_to_text(const std::string& text) {
+        return convert_text("/convert/md-to-text", text);
+    }
+
+    // ---- rates history + usage range ----
+
+    rates_history_result rates_history() {
+        auto resp = request("GET", "/rates/history", "", build_headers(tier::none, {}), 0);
+        rates_history_result r;
+        r.range_days = static_cast<long>(detail::get_number(resp.body, "range_days"));
+        if (r.range_days == 0) r.range_days = 30;
+        r.total_changes = static_cast<long>(detail::get_number(resp.body, "total_changes"));
+        // Minimal parse: pull each row's fields from the array by scanning
+        // for `changed_at`. The hand-rolled reader doesn't do arrays, so we
+        // stop at the first row; callers wanting full history should hand
+        // raw_body to a real JSON library. Documented in README.
+        r.raw_body = resp.body;
+        return r;
+    }
+
+    usage_range_result usage_range(const std::string& from, const std::string& to) {
+        if (from.empty() || to.empty()) {
+            throw invalid_request_error("from and to required (YYYY-MM-DD)", 0, "", "");
+        }
+        std::string path = "/usage/range?from=" + url_encode(from) + "&to=" + url_encode(to);
+        auto resp = request("GET", path, "", build_headers(tier::none, {}), 0);
+        usage_range_result r;
+        r.from = detail::get_string(resp.body, "from");
+        r.to   = detail::get_string(resp.body, "to");
+        r.credits_used = static_cast<long>(detail::get_number(resp.body, "credits_used"));
+        r.raw_body = resp.body;
+        // daily[] array not modeled — callers with a real JSON lib can parse.
+        return r;
+    }
+
+    // ---- custom prompts (Business/Enterprise) ----
+
+    custom_prompt_result custom_prompt_submit(const std::string& voice_name,
+                                              const std::string& instruction,
+                                              const std::string& session_id = "",
+                                              bool allow_overage = false) {
+        if (voice_name.empty() || instruction.empty()) {
+            throw invalid_request_error("voice_name and instruction required", 0, "", "");
+        }
+        std::string body = "{\"voice_name\":\"" + detail::escape_json(voice_name) + "\","
+                         + "\"instruction\":\"" + detail::escape_json(instruction) + "\"";
+        if (!session_id.empty()) body += ",\"session_id\":\"" + detail::escape_json(session_id) + "\"";
+        body += "}";
+        auto headers = build_headers(tier::none, {});
+        if (allow_overage) headers["X-Allow-Overage"] = "true";
+        auto resp = request("POST", "/custom-prompts/submit", body, headers, 0);
+        custom_prompt_result r;
+        r.id = detail::get_string(resp.body, "id");
+        r.voice_name = detail::get_string(resp.body, "voice_name");
+        r.status = detail::get_string(resp.body, "status");
+        r.approved = (r.status == "approved");
+        r.voice_reference = detail::get_string(resp.body, "voice_reference");
+        r.rejection_reason = detail::get_string(resp.body, "rejection_reason");
+        // updated_in_place is boolean; hand-rolled reader treats booleans
+        // as numbers (0/1) — get_number returns 1.0 for `true`.
+        r.updated_in_place = detail::get_number(resp.body, "updated_in_place") > 0.5;
+        r.raw_body = resp.body;
+        return r;
+    }
+
+    custom_prompt_detail custom_prompt_get(const std::string& prompt_id) {
+        if (prompt_id.empty()) throw invalid_request_error("prompt_id required", 0, "", "");
+        auto resp = request("GET", "/custom-prompts/" + url_encode(prompt_id), "", build_headers(tier::none, {}), 0);
+        custom_prompt_detail d;
+        d.id = detail::get_string(resp.body, "id");
+        d.customer_id = detail::get_string(resp.body, "customer_id");
+        d.voice_name = detail::get_string(resp.body, "voice_name");
+        d.instruction = detail::get_string(resp.body, "instruction");
+        d.status = detail::get_string(resp.body, "status");
+        d.voice_reference = detail::get_string(resp.body, "voice_reference");
+        d.approved_alias = detail::get_string(resp.body, "approved_alias");
+        d.rejection_reason = detail::get_string(resp.body, "rejection_reason");
+        d.judge_verdict_json = detail::get_string(resp.body, "judge_verdict_json");
+        d.submitted_at = detail::get_string(resp.body, "submitted_at");
+        d.reviewed_at = detail::get_string(resp.body, "reviewed_at");
+        d.raw_body = resp.body;
+        return d;
+    }
+
 private:
     client_options opts_;
+
+    // Percent-encode a path segment or query value (RFC 3986 unreserved).
+    static std::string url_encode(const std::string& in) {
+        static const char* hex = "0123456789ABCDEF";
+        std::string out;
+        out.reserve(in.size() * 3);
+        for (unsigned char c : in) {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+                out += static_cast<char>(c);
+            } else {
+                out += '%';
+                out += hex[c >> 4];
+                out += hex[c & 0xF];
+            }
+        }
+        return out;
+    }
+
+    static std::string serialize_config(const summarize_config& c) {
+        std::string s = "{";
+        bool first = true;
+        auto sep = [&]() { if (!first) s += ","; first = false; };
+        if (c.model_alias) {
+            sep(); s += "\"model_alias\":\"" + detail::escape_json(*c.model_alias) + "\"";
+        }
+        if (c.temperature) {
+            sep(); s += "\"temperature\":" + std::to_string(*c.temperature);
+        }
+        if (c.top_p) {
+            sep(); s += "\"top_p\":" + std::to_string(*c.top_p);
+        }
+        if (c.max_output_tokens) {
+            sep(); s += "\"max_output_tokens\":" + std::to_string(*c.max_output_tokens);
+        }
+        if (c.max_input_tokens) {
+            sep(); s += "\"max_input_tokens\":" + std::to_string(*c.max_input_tokens);
+        }
+        s += "}";
+        return s;
+    }
+
+    convert_result convert_text(const std::string& path, const std::string& text) {
+        if (text.empty()) {
+            throw invalid_request_error("text must be non-empty", 0, "", "");
+        }
+        std::string body = "{\"text\":\"" + detail::escape_json(text) + "\"}";
+        auto resp = request("POST", path, body, build_headers(tier::none, {}), 0);
+        convert_result r;
+        r.output        = detail::get_string(resp.body, "output");
+        r.output_format = detail::get_string(resp.body, "output_format");
+        r.input_format  = detail::get_string(resp.body, "input_format");
+        r.input_bytes   = static_cast<long>(detail::get_number(resp.body, "input_bytes"));
+        r.output_chars  = static_cast<long>(detail::get_number(resp.body, "output_chars"));
+        r.elapsed_ms    = static_cast<long>(detail::get_number(resp.body, "elapsed_ms"));
+        r.request_id    = detail::get_string(resp.body, "request_id");
+        if (r.request_id.empty()) r.request_id = header_or_empty(resp.headers, "x-request-id");
+        r.raw_body = resp.body;
+        return r;
+    }
 
     static std::string header_or_empty(const std::unordered_map<std::string, std::string>& h,
                                        const std::string& lower_key) {
