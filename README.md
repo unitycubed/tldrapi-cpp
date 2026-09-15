@@ -1,7 +1,11 @@
+> ### ⚠️ Service notice
+>
+> **The RapidAPI listing that backs this SDK is temporarily unavailable while we work through a launch-day issue. Please check back in a few days.**
+
 # tldrapi-cpp — C++ SDK for TLDRapi
 
 Header-only C++17 client for the
-[TLDRapi](https://tldrapi-summarizer.p.rapidapi.com/) text-summarization API.
+[TLDRapi](https://unitycubed.dev/TLDRapi/) text-summarization API.
 
 - **Single header** — `#include <tldrapi/tldrapi.hpp>` and go
 - **One link-time dependency**: libcurl (macOS ships it; Linux
@@ -9,29 +13,6 @@ Header-only C++17 client for the
 - **Zero third-party headers** — parses TLDRapi's JSON responses with
   a minimal built-in extractor. Callers wanting full JSON access can
   hand `raw_body` to nlohmann::json or rapidjson
-
-## Get your app's RapidAPI key
-
-1. Sign in at [rapidapi.com](https://rapidapi.com)
-2. Subscribe to the [TLDRapi Summarizer](https://rapidapi.com/thunderAPIs256/api/tldrapi-summarizer) listing (start with **BASIC** — free)
-3. Go to **Console** (top nav) → **Applications** → **Add App** (or open an existing one)
-4. In the App → **Authorizations** tab → click the copy icon next to your Authorization Key
-
-That's the app's `X-RapidAPI-Key`. Pass it to the SDK constructor.
-
-*Legacy path (deprecated): upper-right (?) → Legacy Developer Dashboard → Add New App → Authorization tab. The new Console path above is simpler.*
-
-The Authorization Key field is the same value in both places — RapidAPI just labels it differently depending on which interface you use:
-
-**New Console:**
-
-![RapidAPI Console — Authorization Method labeled "RAPIDAPI"](https://raw.githubusercontent.com/unitycubed/tldrapi-docs/main/img/rapidapi-key-label-console.png)
-
-**Legacy Developer Dashboard:**
-
-![RapidAPI Legacy Developer Dashboard — Authorization Method labeled "API key"](https://raw.githubusercontent.com/unitycubed/tldrapi-docs/main/img/rapidapi-key-label-legacy.png)
-
-
 
 ## Install
 
@@ -77,6 +58,44 @@ int main() {
 }
 ```
 
+## Quality levels + pricing
+
+Tiers: `quick`, `standard`, `deep`, `premium`, `ultra`. Higher →
+higher quality, larger chunks, more credits.
+
+Credit cost scales with input size (v2.1):
+`cost = 1 + Σ over chunks of (base × ceil(chunk_tokens / 1000))`.
+Base costs and chunk caps are dynamic — fetch the current schedule
+via `c.rates()` or `GET /rates`.
+
+## Advanced quality controls (v-session129+)
+
+Server-side new features reachable from C++ via
+`SummarizeOptions::extra_headers` (a `std::map<std::string,
+std::string>`):
+
+- `X-Quality: <preset>` — one of 30 named presets:
+  `{minimal|brief|balanced|thorough|detailed|complete}-{quick|standard|
+  deep|premium|ultra}` (e.g. `"thorough-standard"`). Five short names
+  are the SCORECARD-validated highlighted anchors.
+- `X-Optional-Quality` / `X-Optional-Extractive-Lvl` /
+  `X-Optional-Strategy` — override any subset of the 3 axes.
+- `X-Allow-Downgrade: true` — opt-in permissive paid-tier downgrade.
+- `X-Async: true` — async submit; response is HTTP 202 with an
+  `X-Paid-Request-Id` header. Poll `GET /paid/result/{id}` until 200.
+
+```cpp
+tldrapi::SummarizeOptions opts;
+opts.tier = tldrapi::tier::premium;
+opts.extra_headers["X-Allow-Downgrade"] = "true";
+opts.extra_headers["X-Optional-Extractive-Lvl"] = "brief";
+auto r = c.summarize(text, opts);
+```
+
+Native `submit_async` / `get_result` / `wait_for_result` methods
+land in the next SDK release; use libcurl or your HTTP client against
+`/paid/result/{id}` for polling today.
+
 ## Error handling
 
 ```cpp
@@ -110,6 +129,4 @@ fresh CURL easy handle. The client itself is stateless after construction.
 
 ## License
 
-Released under the MIT License — see [LICENSE](LICENSE).
-
-Copyright (c) 2026 Ehren Biglari / Unity Cubed.
+MIT — see [LICENSE](./LICENSE).
