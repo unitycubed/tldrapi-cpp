@@ -160,7 +160,7 @@ preset and the server returns `X-Quality-Warning`.
 **30 named presets** arranged as a 1D spectrum across the underlying 3D
 quality space (LLM x retention x strategy). The 5 bolded rows are the
 main anchors; each also accepts a short alias equal to its LLM tier
-name (`quick` / `standard` / `deep` / `premium` / `ultra`).
+name (`quick` / `standard` / `deep` / `premium` / `max`).
 
 | #  | Preset                | What it delivers                                                                                       |
 |---:|-----------------------|--------------------------------------------------------------------------------------------------------|
@@ -187,19 +187,19 @@ name (`quick` / `standard` / `deep` / `premium` / `ultra`).
 | 21 | **`detailed-premium`** | Entity preservation, edge cases, atmospheric detail. Substantial documents and long-form reports.     |
 | 22 | `balanced-premium`    | Moderate-length premium coverage; smoother than Deep, more concise than `detailed-premium`.            |
 | 23 | `thorough-premium`    | Heavy retention with premium reasoning.                                                                |
-| 24 | `minimal-ultra`       | Single-shot on the full document, minimum output length. Ultra fidelity, tiny output.                  |
-| 25 | `brief-ultra`         | Full-context single-shot, 3-sentence output. Ideal for research-grade preview blurbs.                  |
-| 26 | **`complete-ultra`**  | Single-shot on the full document, maximum retention, no chunking artifacts. Book-length manuscripts, long-form technical documentation. |
+| 24 | `minimal-max`       | Single-shot on the full document, minimum output length. Ultra fidelity, tiny output.                  |
+| 25 | `brief-max`         | Full-context single-shot, 3-sentence output. Ideal for research-grade preview blurbs.                  |
+| 26 | **`complete-max`**  | Single-shot on the full document, maximum retention, no chunking artifacts. Book-length manuscripts, long-form technical documentation. |
 | 27 | `complete-premium`    | Maximum Premium retention; almost every noteworthy fact.                                               |
-| 28 | `balanced-ultra`      | Full-context single-shot, balanced-length output.                                                      |
-| 29 | `thorough-ultra`      | Full-context, retains most secondary facts.                                                            |
-| 30 | `detailed-ultra`      | Full-context, near-maximum retention; the top rung of the spectrum.                                    |
+| 28 | `balanced-max`      | Full-context single-shot, balanced-length output.                                                      |
+| 29 | `thorough-max`      | Full-context, retains most secondary facts.                                                            |
+| 30 | `detailed-max`      | Full-context, near-maximum retention; the top rung of the spectrum.                                    |
 
 
 **Three optional axis overrides**, sent as headers via `extra_headers`
 (a `std::map<std::string, std::string>`):
 
-- `X-Optional-Quality` — LLM tier: `quick | standard | deep | premium | ultra`
+- `X-Optional-Quality` — LLM tier: `quick | standard | deep | premium | max`
 - `X-Optional-Extractive-Lvl` — retention level: `minimal | brief | balanced | thorough | detailed | complete`
 - `X-Optional-Strategy` — inference strategy: `contextual-compression | premium-single-shot | hierarchical-merge`
 - `X-Allow-Downgrade` — set `"true"` to opt into permissive paid-tier downgrade
@@ -221,7 +221,7 @@ r = c.summarize(text, opts);
 
 // all three axes, no preset
 opts = {};
-opts.extra_headers["X-Optional-Quality"] = "ultra";
+opts.extra_headers["X-Optional-Quality"] = "max";
 opts.extra_headers["X-Optional-Extractive-Lvl"] = "complete";
 opts.extra_headers["X-Optional-Strategy"] = "premium-single-shot";
 r = c.summarize(text, opts);

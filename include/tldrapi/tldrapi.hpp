@@ -70,7 +70,7 @@ constexpr const char* DEFAULT_RAPIDAPI_HOST = "tldrapi-summarizer.p.rapidapi.com
 
 // Quality tiers. Free tier: pass tier::none (or leave options.tier at
 // default) and the server picks. Paid tiers: pick explicitly.
-enum class tier { none, quick, standard, deep, premium, ultra };
+enum class tier { none, quick, standard, deep, premium, max };
 
 inline std::string tier_to_string(tier t) {
     switch (t) {
@@ -78,7 +78,7 @@ inline std::string tier_to_string(tier t) {
         case tier::standard: return "standard";
         case tier::deep:     return "deep";
         case tier::premium:  return "premium";
-        case tier::ultra:    return "ultra";
+        case tier::max:    return "max";
         default:             return "";
     }
 }
@@ -195,7 +195,7 @@ struct rates_result {
     int standard = 5;
     int deep = 30;
     int premium = 110;
-    int ultra = 400;
+    int max = 400;
     std::string credit_costs_updated_at;
     std::string updated_at;  // Deprecated: use credit_costs_updated_at.
     std::string history_url;
@@ -588,7 +588,7 @@ public:
         r.standard = static_cast<int>(detail::get_number(cpc, "standard"));
         r.deep     = static_cast<int>(detail::get_number(cpc, "deep"));
         r.premium  = static_cast<int>(detail::get_number(cpc, "premium"));
-        r.ultra    = static_cast<int>(detail::get_number(cpc, "ultra"));
+        r.max    = static_cast<int>(detail::get_number(cpc, "max"));
         r.credit_costs_updated_at = detail::get_string(resp.body, "credit_costs_updated_at");
         r.updated_at = r.credit_costs_updated_at;  // Deprecated alias.
         r.history_url = detail::get_string(resp.body, "history_url");
@@ -598,7 +598,7 @@ public:
         if (r.standard == 0) r.standard = 5;
         if (r.deep == 0) r.deep = 30;
         if (r.premium == 0) r.premium = 110;
-        if (r.ultra == 0) r.ultra = 400;
+        if (r.max == 0) r.max = 400;
         return r;
     }
 

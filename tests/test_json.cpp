@@ -78,7 +78,7 @@ int main() {
 
     // Tier enum stringifier
     EXPECT_STREQ(tier_to_string(tier::quick), "quick");
-    EXPECT_STREQ(tier_to_string(tier::ultra), "ultra");
+    EXPECT_STREQ(tier_to_string(tier::max), "max");
     EXPECT_STREQ(tier_to_string(tier::none), "");
 
     // client constructor rejects empty key
